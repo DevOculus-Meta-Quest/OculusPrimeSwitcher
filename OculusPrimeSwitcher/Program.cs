@@ -1,158 +1,155 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Management; // Temporary: For monitoring processes
+using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 
 namespace OculusPrimeSwitcher
 {
     public class Program
     {
-        // Temporary: For monitoring processes
-        private static ManagementEventWatcher startWatcher;
-        private static ManagementEventWatcher stopWatcher;
-
         public static void Main()
         {
-            // Temporary: Start monitoring Oculus-related processes
-            StartMonitoringOculusProcesses();
-
             try
             {
-                string oculusPath = GetOculusPath();
-                var steamPaths = GetSteamPaths();
-                if (steamPaths == null || string.IsNullOrEmpty(oculusPath))
+                Log("Application started.");
+
+                string? oculusPath = GetOculusPath();
+                if (string.IsNullOrEmpty(oculusPath))
                 {
-                    Log("Failed to retrieve Oculus or Steam paths.");
+                    LogError("Oculus path not found. Exiting...");
                     return;
                 }
 
-                string startupPath = steamPaths.Item1;
-                string vrServerPath = steamPaths.Item2;
-
-                Process.Start(startupPath); // Start SteamVR without waiting for it to exit
-
-                while (true)
+                var steamPaths = GetSteamPaths();
+                if (steamPaths == null)
                 {
-                    Process vrServerProcess = GetProcessByNameAndPath("vrserver", vrServerPath);
-                    if (vrServerProcess != null)
-                    {
-                        vrServerProcess.WaitForExit();
-                        break;
-                    }
+                    LogError("Steam paths not found. Exiting...");
+                    return;
                 }
 
-                Process ovrServerProcess = GetProcessByNameAndPath("OVRServer_x64", oculusPath);
-                if (ovrServerProcess != null)
-                {
-                    ovrServerProcess.Kill();
-                    ovrServerProcess.WaitForExit();
-                }
+                string startupPath = steamPaths["startupPath"];
+                string vrServerPath = steamPaths["vrServerPath"];
+
+                Log($"Starting OculusDash from path: {oculusPath}");
+                Process.Start(oculusPath);
+
+                Log($"Starting SteamVR from path: {startupPath}");
+                Process.Start(startupPath);
+
+                // Wait for vrserver.exe to start
+                WaitForProcessToStart("vrserver");
+
+                // Wait for vrserver.exe to exit
+                WaitForProcessToExit("vrserver");
+
+                // Kill OVRServer_x64.exe if it's still running
+                KillProcess("OVRServer_x64", oculusPath);
             }
             catch (Exception e)
             {
-                Log($"An exception occurred: {e.Message}");
+                LogError($"An exception occurred: {e}");
             }
         }
 
-        static string GetOculusPath()
+        static string? GetOculusPath()
         {
-            string oculusPath = Environment.GetEnvironmentVariable("OculusBase");
+            string? oculusPath = Environment.GetEnvironmentVariable("OculusBase");
             if (string.IsNullOrEmpty(oculusPath))
             {
-                Log("Oculus installation environment not found.");
+                LogError("Oculus installation environment not found.");
                 return null;
             }
 
             oculusPath = Path.Combine(oculusPath, @"Support\oculus-runtime\OVRServer_x64.exe");
             if (!File.Exists(oculusPath))
             {
-                Log("Oculus server executable not found.");
+                LogError("Oculus server executable not found.");
                 return null;
             }
 
             return oculusPath;
         }
 
-        public static Tuple<string, string> GetSteamPaths()
+        public static Dictionary<string, string>? GetSteamPaths()
         {
             string openVrPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"openvr\openvrpaths.vrpath");
             if (!File.Exists(openVrPath))
             {
-                Log("OpenVR Paths file not found.");
+                LogError("OpenVR Paths file not found. Has SteamVR been run once?");
                 return null;
             }
 
             try
             {
-                var openvrPaths = JObject.Parse(File.ReadAllText(openVrPath));
+                string openvrJsonString = File.ReadAllText(openVrPath);
+                var openvrPaths = JObject.Parse(openvrJsonString);
+
                 string location = openvrPaths["runtime"][0].ToString();
                 string startupPath = Path.Combine(location, @"bin\win64\vrstartup.exe");
                 string serverPath = Path.Combine(location, @"bin\win64\vrserver.exe");
 
                 if (!File.Exists(startupPath) || !File.Exists(serverPath))
                 {
-                    Log("SteamVR executables not found.");
+                    LogError("SteamVR executables do not exist. Has SteamVR been run once?");
                     return null;
                 }
 
-                return new Tuple<string, string>(startupPath, serverPath);
+                return new Dictionary<string, string>
+                {
+                    {"startupPath", startupPath},
+                    {"vrServerPath", serverPath}
+                };
             }
             catch (Exception e)
             {
-                Log($"Error reading OpenVR Paths file: {e.Message}");
+                LogError($"Error reading OpenVR Paths file: {e}");
                 return null;
             }
         }
 
-        static Process GetProcessByNameAndPath(string processName, string processPath)
+        static void WaitForProcessToStart(string processName)
         {
-            foreach (var process in Process.GetProcessesByName(processName))
+            Log($"Waiting for {processName} to start...");
+            while (Process.GetProcessesByName(processName).Length == 0)
             {
-                if (process.MainModule.FileName.Equals(processPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    return process;
-                }
+                System.Threading.Thread.Sleep(500);
             }
-            return null;
+            Log($"{processName} started.");
+        }
+
+        static void WaitForProcessToExit(string processName)
+        {
+            Log($"Waiting for {processName} to exit...");
+            while (Process.GetProcessesByName(processName).Length > 0)
+            {
+                System.Threading.Thread.Sleep(500);
+            }
+            Log($"{processName} exited.");
+        }
+
+        static void KillProcess(string processName, string path)
+        {
+            var process = Array.Find(Process.GetProcessesByName(processName), p => p.MainModule.FileName == path);
+            if (process != null)
+            {
+                Log($"Killing process: {processName}");
+                process.Kill();
+                process.WaitForExit();
+                Log($"{processName} killed.");
+            }
         }
 
         static void Log(string message)
         {
-            string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OculusPrimeSwitcher.log");
-            File.AppendAllText(logPath, $"{DateTime.Now}: {message}\n");
+            string logMessage = $"{DateTime.Now}: {message}";
+            Console.WriteLine(logMessage);
+            File.AppendAllText("OculusPrimeSwitcher.log", logMessage + Environment.NewLine);
         }
 
-        // Temporary: For monitoring processes
-        static void StartMonitoringOculusProcesses()
+        static void LogError(string message)
         {
-            startWatcher = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace"));
-            startWatcher.EventArrived += OnProcessStarted;
-            startWatcher.Start();
-
-            stopWatcher = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStopTrace"));
-            stopWatcher.EventArrived += OnProcessStopped;
-            stopWatcher.Start();
-        }
-
-        // Temporary: For monitoring processes
-        static void OnProcessStarted(object sender, EventArrivedEventArgs e)
-        {
-            string processName = e.NewEvent.Properties["ProcessName"].Value.ToString();
-            if (processName.ToLower().Contains("oculus"))
-            {
-                Log($"Oculus-related process started: {processName}");
-            }
-        }
-
-        // Temporary: For monitoring processes
-        static void OnProcessStopped(object sender, EventArrivedEventArgs e)
-        {
-            string processName = e.NewEvent.Properties["ProcessName"].Value.ToString();
-            if (processName.ToLower().Contains("oculus"))
-            {
-                Log($"Oculus-related process stopped: {processName}");
-            }
+            Log($"ERROR: {message}");
         }
     }
 }
