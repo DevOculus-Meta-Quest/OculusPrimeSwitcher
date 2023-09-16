@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 namespace OculusPrimeSwitcher
 {
@@ -32,6 +33,9 @@ namespace OculusPrimeSwitcher
 
                 Log($"Starting OculusDash from path: {oculusPath}");
                 Process.Start(oculusPath);
+
+                Log($"Starting SteamVR from path: {startupPath}");
+                Process.Start(startupPath);
 
                 // Wait for vrserver.exe to start
                 WaitForProcessToStart("vrserver");
@@ -79,7 +83,7 @@ namespace OculusPrimeSwitcher
             try
             {
                 string openvrJsonString = File.ReadAllText(openVrPath);
-                dynamic openvrPaths = Newtonsoft.Json.JsonConvert.DeserializeObject(openvrJsonString);
+                var openvrPaths = JObject.Parse(openvrJsonString);
 
                 string location = openvrPaths["runtime"][0].ToString();
                 string startupPath = Path.Combine(location, @"bin\win64\vrstartup.exe");
@@ -109,7 +113,7 @@ namespace OculusPrimeSwitcher
             Log($"Waiting for {processName} to start...");
             while (Process.GetProcessesByName(processName).Length == 0)
             {
-                System.Threading.Thread.Sleep(1000);
+                System.Threading.Thread.Sleep(500);
             }
             Log($"{processName} started.");
         }
@@ -119,22 +123,20 @@ namespace OculusPrimeSwitcher
             Log($"Waiting for {processName} to exit...");
             while (Process.GetProcessesByName(processName).Length > 0)
             {
-                System.Threading.Thread.Sleep(1000);
+                System.Threading.Thread.Sleep(500);
             }
             Log($"{processName} exited.");
         }
 
         static void KillProcess(string processName, string path)
         {
-            foreach (var process in Process.GetProcessesByName(processName))
+            var process = Array.Find(Process.GetProcessesByName(processName), p => p.MainModule.FileName == path);
+            if (process != null)
             {
-                if (process.MainModule.FileName == path)
-                {
-                    Log($"Killing process {processName}...");
-                    process.Kill();
-                    process.WaitForExit();
-                    Log($"{processName} killed.");
-                }
+                Log($"Killing process: {processName}");
+                process.Kill();
+                process.WaitForExit();
+                Log($"{processName} killed.");
             }
         }
 
