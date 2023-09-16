@@ -1,25 +1,24 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Management; // Temporary: For monitoring processes
+using System.Management; // For monitoring processes
 using Newtonsoft.Json.Linq;
 
 namespace OculusPrimeSwitcher
 {
     public class Program
     {
-        // Temporary: For monitoring processes
-        private static ManagementEventWatcher startWatcher;
-        private static ManagementEventWatcher stopWatcher;
+        private static ManagementEventWatcher? startWatcher;
+        private static ManagementEventWatcher? stopWatcher;
 
         public static void Main()
         {
-            // Temporary: Start monitoring Oculus-related processes
+            // Temporary monitoring for debugging purposes
             StartMonitoringOculusProcesses();
 
             try
             {
-                string oculusPath = GetOculusPath();
+                string? oculusPath = GetOculusPath();
                 var steamPaths = GetSteamPaths();
                 if (steamPaths == null || string.IsNullOrEmpty(oculusPath))
                 {
@@ -34,7 +33,7 @@ namespace OculusPrimeSwitcher
 
                 while (true)
                 {
-                    Process vrServerProcess = GetProcessByNameAndPath("vrserver", vrServerPath);
+                    Process? vrServerProcess = GetProcessByNameAndPath("vrserver", vrServerPath);
                     if (vrServerProcess != null)
                     {
                         vrServerProcess.WaitForExit();
@@ -42,7 +41,7 @@ namespace OculusPrimeSwitcher
                     }
                 }
 
-                Process ovrServerProcess = GetProcessByNameAndPath("OVRServer_x64", oculusPath);
+                Process? ovrServerProcess = GetProcessByNameAndPath("OVRServer_x64", oculusPath);
                 if (ovrServerProcess != null)
                 {
                     ovrServerProcess.Kill();
@@ -55,9 +54,9 @@ namespace OculusPrimeSwitcher
             }
         }
 
-        static string GetOculusPath()
+        static string? GetOculusPath()
         {
-            string oculusPath = Environment.GetEnvironmentVariable("OculusBase");
+            string? oculusPath = Environment.GetEnvironmentVariable("OculusBase");
             if (string.IsNullOrEmpty(oculusPath))
             {
                 Log("Oculus installation environment not found.");
@@ -74,7 +73,7 @@ namespace OculusPrimeSwitcher
             return oculusPath;
         }
 
-        public static Tuple<string, string> GetSteamPaths()
+        public static Tuple<string, string>? GetSteamPaths()
         {
             string openVrPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"openvr\openvrpaths.vrpath");
             if (!File.Exists(openVrPath))
@@ -105,7 +104,7 @@ namespace OculusPrimeSwitcher
             }
         }
 
-        static Process GetProcessByNameAndPath(string processName, string processPath)
+        static Process? GetProcessByNameAndPath(string processName, string processPath)
         {
             foreach (var process in Process.GetProcessesByName(processName))
             {
@@ -123,7 +122,7 @@ namespace OculusPrimeSwitcher
             File.AppendAllText(logPath, $"{DateTime.Now}: {message}\n");
         }
 
-        // Temporary: For monitoring processes
+        // Temporary monitoring for debugging purposes
         static void StartMonitoringOculusProcesses()
         {
             startWatcher = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace"));
@@ -135,7 +134,7 @@ namespace OculusPrimeSwitcher
             stopWatcher.Start();
         }
 
-        // Temporary: For monitoring processes
+        // Temporary monitoring for debugging purposes
         static void OnProcessStarted(object sender, EventArrivedEventArgs e)
         {
             string processName = e.NewEvent.Properties["ProcessName"].Value.ToString();
@@ -145,7 +144,7 @@ namespace OculusPrimeSwitcher
             }
         }
 
-        // Temporary: For monitoring processes
+        // Temporary monitoring for debugging purposes
         static void OnProcessStopped(object sender, EventArrivedEventArgs e)
         {
             string processName = e.NewEvent.Properties["ProcessName"].Value.ToString();
