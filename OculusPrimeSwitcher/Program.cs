@@ -40,6 +40,9 @@ namespace OculusPrimeSwitcher
                 // Wait for vrserver.exe to start
                 WaitForProcessToStart("vrserver");
 
+                // Start monitoring OVRService
+                MonitorOVRService();
+
                 // Wait for vrserver.exe to exit
                 WaitForProcessToExit("vrserver");
 
@@ -128,15 +131,46 @@ namespace OculusPrimeSwitcher
             Log($"{processName} exited.");
         }
 
-        static void KillProcess(string processName, string path)
+        static void KillProcess(string processName, string? path = null)
         {
-            var process = Array.Find(Process.GetProcessesByName(processName), p => p.MainModule.FileName == path);
+            var process = Array.Find(Process.GetProcessesByName(processName), p => path == null || p.MainModule.FileName == path);
             if (process != null)
             {
                 Log($"Killing process: {processName}");
                 process.Kill();
                 process.WaitForExit();
                 Log($"{processName} killed.");
+            }
+        }
+
+        /// <summary>
+        /// Monitors the OVRService process and kills SteamVR processes when OVRService stops.
+        /// </summary>
+        static void MonitorOVRService()
+        {
+            Log("Monitoring OVRService...");
+            while (true)
+            {
+                var ovrService = Process.GetProcessesByName("OVRService");
+                if (ovrService.Length == 0)
+                {
+                    Log("OVRService stopped. Killing SteamVR processes...");
+                    KillSteamVRProcesses();
+                    break;
+                }
+                System.Threading.Thread.Sleep(500);
+            }
+        }
+
+        /// <summary>
+        /// Kills all SteamVR processes.
+        /// </summary>
+        static void KillSteamVRProcesses()
+        {
+            var steamVRProcesses = new string[] { "vrstartup", "vrserver", "vrmonitor" };
+            foreach (var processName in steamVRProcesses)
+            {
+                KillProcess(processName);
             }
         }
 
