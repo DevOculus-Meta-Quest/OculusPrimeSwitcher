@@ -87,6 +87,7 @@ namespace OculusPrimeSwitcher
             {
                 var openvrPaths = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, dynamic>>(File.ReadAllText(openVrPath));
                 string? location = openvrPaths?["runtime"]?[0]?.ToString();
+
                 if (location == null)
                 {
                     MessageBox.Show("Location not found in OpenVR Paths file.");
