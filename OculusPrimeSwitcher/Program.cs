@@ -1,120 +1,117 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using Newtonsoft.Json;
+using System.Collections.Generic;
 
 namespace OculusPrimeSwitcher
 {
     public class Program
     {
-        public static async Task Main()
+        public static void Main()
         {
             try
             {
-                string oculusPath = GetOculusPath();
-                Dictionary<string, string> steamPaths = GetSteamPaths();
-
-                if (steamPaths == null || string.IsNullOrEmpty(oculusPath))
+                string? oculusPath = GetOculusPath();
+                var result = GetSteamPaths();
+                if (result == null || string.IsNullOrEmpty(oculusPath))
                 {
                     return;
                 }
+                string startupPath = result["startupPath"];
+                string vrServerPath = result["vrServerPath"];
 
-                await StartAndMonitorSteamVR(steamPaths["startupPath"], steamPaths["serverPath"], oculusPath);
+                Process.Start(startupPath).WaitForExit();
+
+                Stopwatch sw = Stopwatch.StartNew();
+                while (true)
+                {
+                    if (sw.ElapsedMilliseconds >= 10000)
+                    {
+                        MessageBox.Show("SteamVR vrserver not found... (Did SteamVR crash?)");
+                        return;
+                    }
+
+                    Process? vrServerProcess = Array.Find(Process.GetProcessesByName("vrserver"), process => process.MainModule.FileName == vrServerPath);
+                    if (vrServerProcess == null)
+                        continue;
+                    vrServerProcess.WaitForExit();
+
+                    Process? ovrServerProcess = Array.Find(Process.GetProcessesByName("OVRServer_x64"), process => process.MainModule.FileName == oculusPath);
+                    if (ovrServerProcess == null)
+                    {
+                        MessageBox.Show("Oculus runtime not found...");
+                        return;
+                    }
+
+                    ovrServerProcess.Kill();
+                    ovrServerProcess.WaitForExit();
+                    break;
+                }
             }
             catch (Exception e)
             {
-                MessageBox.Show($"An exception occurred: {e.Message}");
+                MessageBox.Show($"An exception occurred while attempting to find/start SteamVR...\n\nMessage: {e}");
             }
         }
 
-        static string GetOculusPath()
+        static string? GetOculusPath()
         {
-            string oculusBasePath = Environment.GetEnvironmentVariable("OculusBase");
-            if (string.IsNullOrEmpty(oculusBasePath))
+            string oculusPath = Environment.GetEnvironmentVariable("OculusBase") ?? string.Empty;
+            if (string.IsNullOrEmpty(oculusPath))
             {
                 MessageBox.Show("Oculus installation environment not found...");
                 return null;
             }
 
-            string oculusServerPath = Path.Combine(oculusBasePath, @"Support\oculus-runtime\OVRServer_x64.exe");
-            if (!File.Exists(oculusServerPath))
+            oculusPath = Path.Combine(oculusPath, @"Support\oculus-runtime\OVRServer_x64.exe");
+            if (!File.Exists(oculusPath))
             {
                 MessageBox.Show("Oculus server executable not found...");
                 return null;
             }
 
-            return oculusServerPath;
+            return oculusPath;
         }
 
-        public static Dictionary<string, string> GetSteamPaths()
+        public static Dictionary<string, string>? GetSteamPaths()
         {
             string openVrPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"openvr\openvrpaths.vrpath");
             if (!File.Exists(openVrPath))
             {
-                MessageBox.Show("OpenVR Paths file not found. Has SteamVR been run once?");
+                MessageBox.Show("OpenVR Paths file not found... (Has SteamVR been run once?)");
                 return null;
             }
 
             try
             {
-                var openvrPaths = JsonConvert.DeserializeObject<dynamic>(File.ReadAllText(openVrPath));
-                string runtimeLocation = openvrPaths["runtime"][0].ToString();
-                var paths = new Dictionary<string, string>
+                var openvrPaths = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, dynamic>>(File.ReadAllText(openVrPath));
+                string? location = openvrPaths?["runtime"]?[0]?.ToString();
+                if (location == null)
                 {
-                    ["startupPath"] = Path.Combine(runtimeLocation, @"bin\win64\vrstartup.exe"),
-                    ["serverPath"] = Path.Combine(runtimeLocation, @"bin\win64\vrserver.exe")
-                };
-
-                if (!File.Exists(paths["startupPath"]) || !File.Exists(paths["serverPath"]))
-                {
-                    MessageBox.Show("SteamVR executables not found. Has SteamVR been run once?");
+                    MessageBox.Show("Location not found in OpenVR Paths file.");
                     return null;
                 }
 
-                return paths;
+                string startupPath = Path.Combine(location, @"bin\win64\vrstartup.exe");
+                string serverPath = Path.Combine(location, @"bin\win64\vrserver.exe");
+
+                if (!File.Exists(startupPath) || !File.Exists(serverPath))
+                {
+                    MessageBox.Show("SteamVR executable(s) do not exist... (Has SteamVR been run once?)");
+                    return null;
+                }
+
+                return new Dictionary<string, string>
+                {
+                    { "startupPath", startupPath },
+                    { "vrServerPath", serverPath }
+                };
             }
             catch (Exception e)
             {
-                MessageBox.Show($"Corrupt OpenVR Paths file found. Has SteamVR been run once? Error: {e.Message}");
+                MessageBox.Show($"Corrupt OpenVR Paths file found... (Has SteamVR been run once?)\n\nMessage: {e}");
                 return null;
-            }
-        }
-
-        public static async Task StartAndMonitorSteamVR(string startupPath, string vrServerPath, string oculusPath)
-        {
-            Process.Start(startupPath).WaitForExit();
-
-            Stopwatch sw = Stopwatch.StartNew();
-            while (true)
-            {
-                if (sw.ElapsedMilliseconds >= 10000)
-                {
-                    MessageBox.Show("SteamVR vrserver not found. Did SteamVR crash?");
-                    return;
-                }
-
-                Process vrServerProcess = Process.GetProcessesByName("vrserver").FirstOrDefault(process => process.MainModule.FileName == vrServerPath);
-                if (vrServerProcess == null)
-                    continue;
-
-                await vrServerProcess.WaitForExitAsync();
-
-                Process ovrServerProcess = Process.GetProcessesByName("OVRServer_x64").FirstOrDefault(process => process.MainModule.FileName == oculusPath);
-                if (ovrServerProcess == null)
-                {
-                    MessageBox.Show("Oculus runtime not found.");
-                    return;
-                }
-
-                await Task.Delay(5000); // Wait for 5 seconds before killing the Oculus process.
-
-                ovrServerProcess.Kill();
-                await ovrServerProcess.WaitForExitAsync();
-                break;
             }
         }
     }
