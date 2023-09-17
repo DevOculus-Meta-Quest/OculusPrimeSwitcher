@@ -15,7 +15,6 @@ namespace OculusPrimeSwitcher
                 // Log the start of the application
                 Log("Application started.");
 
-                // Get the path to the Oculus executable
                 string? oculusPath = GetOculusPath();
                 if (string.IsNullOrEmpty(oculusPath))
                 {
@@ -23,7 +22,6 @@ namespace OculusPrimeSwitcher
                     return;
                 }
 
-                // Get the paths to the SteamVR executables
                 var steamPaths = GetSteamPaths();
                 if (steamPaths == null)
                 {
@@ -34,25 +32,23 @@ namespace OculusPrimeSwitcher
                 string startupPath = steamPaths["startupPath"];
                 string vrServerPath = steamPaths["vrServerPath"];
 
-                // Start the Oculus executable
                 Log($"Starting OculusDash from path: {oculusPath}");
                 Process.Start(oculusPath);
 
-                // Start the SteamVR executable
                 Log($"Starting SteamVR from path: {startupPath}");
                 Process.Start(startupPath);
 
-                // Wait for the vrserver.exe process to start
+                // Wait for vrserver.exe to start
                 WaitForProcessToStart("vrserver");
+
+                // Wait for vrserver.exe to exit
+                WaitForProcessToExit("vrserver");
+
+                // Kill OVRServer_x64.exe if it's still running
+                KillProcess("OVRServer_x64", oculusPath);
 
                 // Monitor the OVRService process
                 MonitorOVRService();
-
-                // Wait for the vrserver.exe process to exit
-                WaitForProcessToExit("vrserver");
-
-                // Kill the OVRServer_x64.exe process if it's still running
-                KillProcess("OVRServer_x64", oculusPath);
             }
             catch (Exception e)
             {
@@ -61,12 +57,8 @@ namespace OculusPrimeSwitcher
             }
         }
 
-        /// <summary>
-        /// Retrieves the path to the Oculus executable.
-        /// </summary>
         static string? GetOculusPath()
         {
-            // Get the Oculus installation path from the environment variables
             string? oculusPath = Environment.GetEnvironmentVariable("OculusBase");
             if (string.IsNullOrEmpty(oculusPath))
             {
@@ -74,7 +66,6 @@ namespace OculusPrimeSwitcher
                 return null;
             }
 
-            // Construct the full path to the Oculus server executable
             oculusPath = Path.Combine(oculusPath, @"Support\oculus-runtime\OVRServer_x64.exe");
             if (!File.Exists(oculusPath))
             {
@@ -85,12 +76,8 @@ namespace OculusPrimeSwitcher
             return oculusPath;
         }
 
-        /// <summary>
-        /// Retrieves the paths to the SteamVR executables.
-        /// </summary>
         public static Dictionary<string, string>? GetSteamPaths()
         {
-            // Construct the path to the OpenVR configuration file
             string openVrPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"openvr\openvrpaths.vrpath");
             if (!File.Exists(openVrPath))
             {
@@ -100,11 +87,9 @@ namespace OculusPrimeSwitcher
 
             try
             {
-                // Read the OpenVR configuration file and parse its JSON content
                 string openvrJsonString = File.ReadAllText(openVrPath);
                 var openvrPaths = JObject.Parse(openvrJsonString);
 
-                // Extract the paths to the SteamVR executables
                 string location = openvrPaths["runtime"][0].ToString();
                 string startupPath = Path.Combine(location, @"bin\win64\vrstartup.exe");
                 string serverPath = Path.Combine(location, @"bin\win64\vrserver.exe");
@@ -128,9 +113,6 @@ namespace OculusPrimeSwitcher
             }
         }
 
-        /// <summary>
-        /// Waits for a specific process to start.
-        /// </summary>
         static void WaitForProcessToStart(string processName)
         {
             Log($"Waiting for {processName} to start...");
@@ -141,9 +123,6 @@ namespace OculusPrimeSwitcher
             Log($"{processName} started.");
         }
 
-        /// <summary>
-        /// Waits for a specific process to exit.
-        /// </summary>
         static void WaitForProcessToExit(string processName)
         {
             Log($"Waiting for {processName} to exit...");
@@ -154,9 +133,6 @@ namespace OculusPrimeSwitcher
             Log($"{processName} exited.");
         }
 
-        /// <summary>
-        /// Kills a specific process.
-        /// </summary>
         static void KillProcess(string processName, string path)
         {
             var process = Array.Find(Process.GetProcessesByName(processName), p => p.MainModule.FileName == path);
@@ -171,7 +147,7 @@ namespace OculusPrimeSwitcher
 
         /// <summary>
         /// Monitors the OVRService process and kills SteamVR processes when OVRService stops.
-        /// Then restarts the OVRService after a delay.
+        /// Then restarts the OVRService after a delay if it's not already running.
         /// </summary>
         static void MonitorOVRService()
         {
@@ -187,10 +163,14 @@ namespace OculusPrimeSwitcher
                     // Wait for 1 second
                     System.Threading.Thread.Sleep(1000);
 
-                    // Restart OVRService
-                    Log("Restarting OVRService...");
-                    Process.Start("OVRServiceLauncher.exe", "-start");
-                    Log("OVRService restarted.");
+                    // Check if OVRService is not running before trying to restart it
+                    if (Process.GetProcessesByName("OVRService").Length == 0)
+                    {
+                        // Restart OVRService
+                        Log("Restarting OVRService...");
+                        Process.Start("OVRServiceLauncher.exe", "-start");
+                        Log("OVRService restarted.");
+                    }
 
                     break;
                 }
@@ -198,25 +178,15 @@ namespace OculusPrimeSwitcher
             }
         }
 
-        /// <summary>
-        /// Kills all SteamVR related processes.
-        /// </summary>
         static void KillSteamVRProcesses()
         {
-            foreach (var processName in new[] { "vrserver", "vrmonitor", "vrcompositor" })
-            {
-                var processes = Process.GetProcessesByName(processName);
-                foreach (var process in processes)
-                {
-                    process.Kill();
-                    process.WaitForExit();
-                }
-            }
+            // Kill vrserver.exe if it's still running
+            KillProcess("vrserver", string.Empty);
+
+            // Kill vrstartup.exe if it's still running
+            KillProcess("vrstartup", string.Empty);
         }
 
-        /// <summary>
-        /// Logs a message with a timestamp.
-        /// </summary>
         static void Log(string message)
         {
             string logMessage = $"{DateTime.Now}: {message}";
@@ -224,9 +194,6 @@ namespace OculusPrimeSwitcher
             File.AppendAllText("OculusPrimeSwitcher.log", logMessage + Environment.NewLine);
         }
 
-        /// <summary>
-        /// Logs an error message with a timestamp.
-        /// </summary>
         static void LogError(string message)
         {
             Log($"ERROR: {message}");
